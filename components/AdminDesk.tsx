@@ -23,6 +23,12 @@ async function readJson(response: Response) {
   }
 }
 
+function sessionExpired(response: Response) {
+  if (response.status !== 401) return false;
+  window.location.assign("/");
+  return true;
+}
+
 function mailLine(status: EmailStatus) {
   if (status.client === "failed" || status.internal === "failed") {
     return { tone: "bad" as const, text: `Saved. Email did not send.${status.detail ? ` ${status.detail}` : ""}` };
@@ -69,6 +75,7 @@ export default function AdminDesk({ email }: { email: string }) {
     try {
       const response = await fetch("/api/links", { cache: "no-store" });
       const data = await readJson(response);
+      if (sessionExpired(response)) return;
       if (!response.ok) throw new Error(data.error || "Could not open the desk.");
       setLinks(data.links ?? []);
       setNotifyEmails(data.notifyEmails ?? []);
@@ -125,6 +132,7 @@ export default function AdminDesk({ email }: { email: string }) {
         body: JSON.stringify(checked.value),
       });
       const data = await readJson(response);
+      if (sessionExpired(response)) return;
       if (!response.ok) {
         setFormError(data.error || "Could not create the link.");
         if (data.errors) setInviteErrors(data.errors);
@@ -150,6 +158,7 @@ export default function AdminDesk({ email }: { email: string }) {
       body: JSON.stringify({ notifyEmails: list }),
     });
     const data = await readJson(response);
+    if (sessionExpired(response)) return;
     if (!response.ok) {
       setSettingsMsg(data.error || "Could not save recipients.");
       return;
@@ -178,6 +187,7 @@ export default function AdminDesk({ email }: { email: string }) {
     try {
       const response = await fetch(`/api/links/${token}`, { method: "DELETE" });
       const data = await readJson(response);
+      if (sessionExpired(response)) return;
       if (!response.ok) {
         setFormError(data.error || "Could not withdraw the link.");
         return;
@@ -198,6 +208,7 @@ export default function AdminDesk({ email }: { email: string }) {
     try {
       const response = await fetch(`/api/links/${token}/resend`, { method: "POST" });
       const data = await readJson(response);
+      if (sessionExpired(response)) return;
       if (!response.ok) {
         setFormError(data.error || "Could not resend email.");
         return;

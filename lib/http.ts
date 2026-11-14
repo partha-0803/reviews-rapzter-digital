@@ -9,7 +9,13 @@ export function json(data: unknown, status = 200) {
 
 export function errorMessage(error: unknown) {
   if (!(error instanceof Error)) return "Something went wrong.";
-  if (/postgres(?:ql)?:\/\/|password authentication failed|does not support ssl|ECONNREFUSED|ENOTFOUND|relation |syntax error/i.test(error.message)) {
+  if (/self-signed certificate|unable to verify the first certificate|certificate/i.test(error.message)) {
+    return "The database certificate could not be verified. Turn on SSL with a trusted certificate.";
+  }
+  if (/does not support ssl/i.test(error.message)) {
+    return "The database refused the secure connection. Turn on SSL for this server.";
+  }
+  if (/postgres(?:ql)?:\/\/|password authentication failed|ECONNREFUSED|ENOTFOUND|relation |syntax error/i.test(error.message)) {
     return "Could not reach the database. Check DATABASE_URL.";
   }
   return error.message;

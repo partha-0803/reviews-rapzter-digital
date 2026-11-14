@@ -1,9 +1,9 @@
 import { cookies } from "next/headers";
 import { json } from "./http";
-import { adminForSession, createSession, deleteSession } from "./store";
+import { SESSION_IDLE_MS, adminForSession, createSession, deleteSession } from "./store";
 
 const COOKIE = "rd_session";
-const MAX_AGE = 60 * 60 * 12;
+const MAX_AGE = SESSION_IDLE_MS / 1000;
 
 function cookieOptions(maxAge: number) {
   return {
@@ -36,7 +36,10 @@ export async function endSession() {
 }
 
 export async function requireAdmin() {
-  const email = await currentAdmin();
+  const jar = await cookies();
+  const token = jar.get(COOKIE)?.value ?? "";
+  const email = token ? await adminForSession(token) : null;
   if (!email) return json({ error: "Sign in to use the desk." }, 401);
+  jar.set(COOKIE, token, cookieOptions(MAX_AGE));
   return null;
 }

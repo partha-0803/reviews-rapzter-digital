@@ -58,6 +58,8 @@ async function open(): Promise<Executor> {
   return openSqlite();
 }
 
+export const SESSION_IDLE_MS = 30 * 60 * 1000;
+
 function bareConnectionString(url: string) {
   return url
     .replace(/([?&])sslmode=[^&]*&?/i, "$1")
@@ -66,45 +68,23 @@ function bareConnectionString(url: string) {
     .replace(/\?&/, "?");
 }
 
-function sslRequested(url: string) {
-  if (/(?:^|[?&])sslmode=disable(?:&|$)/i.test(url)) return false;
-  return /(?:^|[?&])sslmode=(?:require|verify-ca|verify-full|prefer)(?:&|$)/i.test(url) || /(?:^|[?&])ssl=true(?:&|$)/i.test(url);
-}
-
-function makePool(url: string, ssl: boolean) {
-  return new Pool({
-    connectionString: bareConnectionString(url),
-    max: 5,
-    idleTimeoutMillis: 20_000,
-    connectionTimeoutMillis: 20_000,
-    ssl: ssl ? { rejectUnauthorized: false } : false,
-  });
-}
-
-async function connectPostgres(url: string) {
-  const requested = sslRequested(url);
-  const pool = makePool(url, requested);
-  try {
-    await pool.query("SELECT 1");
-    return pool;
-  } catch (error) {
-    await pool.end().catch(() => undefined);
-    const message = error instanceof Error ? error.message : "";
-    if (!requested || !/does not support ssl/i.test(message)) throw error;
-  }
-  const plain = makePool(url, false);
-  try {
-    await plain.query("SELECT 1");
-    return plain;
-  } catch (error) {
-    await plain.end().catch(() => undefined);
-    throw error;
-  }
+function sslFor(url: string): false | { rejectUnauthorized: true } {
+  const local = /localhost|127\.0\.0\.1/.test(url);
+  if (local && !/(?:^|[?&])sslmode=(?:require|verify-ca|verify-full)(?:&|$)/i.test(url)) return false;
+  return { rejectUnauthorized: true };
 }
 
 async function openPostgres(url: string): Promise<Executor> {
   const cached = globalThis as PgGlobal;
-  if (!cached.__reviewsPgPool) cached.__reviewsPgPool = await connectPostgres(url);
+  if (!cached.__reviewsPgPool) {
+    cached.__reviewsPgPool = new Pool({
+      connectionString: bareConnectionString(url),
+      max: 5,
+      idleTimeoutMillis: 20_000,
+      connectionTimeoutMillis: 20_000,
+      ssl: sslFor(url),
+    });
+  }
   const pool = cached.__reviewsPgPool;
   const executor: Executor = {
     async query(statement, args = []) {
@@ -269,7 +249,7 @@ export async function createSession(email: string) {
   const now = new Date().toISOString();
   await executor.query("DELETE FROM sessions WHERE email = ? OR expires_at <= ?", [email, now]);
   const token = randomBytes(32).toString("base64url");
-  const expires = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  const expires = new Date(Date.now() + SESSION_IDLE_MS).toISOString();
   await executor.query("INSERT INTO sessions (token_hash, email, expires_at) VALUES (?, ?, ?)", [
     sha256(token),
     email,
@@ -289,6 +269,8 @@ export async function adminForSession(token: string) {
     await executor.query("DELETE FROM sessions WHERE token_hash = ?", [hash]);
     return null;
   }
+  const expires = new Date(Date.now() + SESSION_IDLE_MS).toISOString();
+  await executor.query("UPDATE sessions SET expires_at = ? WHERE token_hash = ?", [expires, hash]);
   return String(row.email);
 }
 
