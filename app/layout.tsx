@@ -15,6 +15,11 @@ export const metadata: Metadata = {
   },
   description: "Private review links for Rapzter Digital clients.",
   robots: { index: false, follow: false },
+  icons: {
+    icon: [{ url: "/favicon-32.png", type: "image/png", sizes: "32x32" }],
+    shortcut: "/favicon-32.png",
+    apple: "/favicon-32.png",
+  },
 };
 
 export const viewport: Viewport = {

@@ -12,8 +12,9 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { token } = await params;
   const link = await getLink(token);
-  if (!link) return { title: "Review link" };
-  return { title: `${link.brandName} review` };
+  const icons = { icon: "/favicon-32.png", shortcut: "/favicon-32.png", apple: "/favicon-32.png" };
+  if (!link) return { title: "Review link", icons };
+  return { title: `${link.brandName} review`, icons };
 }
 
 export default async function ReviewPage({ params }: { params: Promise<{ token: string }> }) {
