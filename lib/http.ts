@@ -10,7 +10,7 @@ export function json(data: unknown, status = 200) {
 export function errorMessage(error: unknown) {
   if (!(error instanceof Error)) return "Something went wrong.";
   if (/self-signed certificate|unable to verify the first certificate|certificate/i.test(error.message)) {
-    return "The database certificate could not be verified. Turn on SSL with a trusted certificate.";
+    return "The database connection could not be encrypted. In Coolify set the Postgres SSL mode to require, then restart the database.";
   }
   if (/does not support ssl/i.test(error.message)) {
     return "The database refused the secure connection. Turn on SSL for this server.";

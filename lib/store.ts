@@ -68,10 +68,14 @@ function bareConnectionString(url: string) {
     .replace(/\?&/, "?");
 }
 
-function sslFor(url: string): false | { rejectUnauthorized: true } {
-  const local = /localhost|127\.0\.0\.1/.test(url);
-  if (local && !/(?:^|[?&])sslmode=(?:require|verify-ca|verify-full)(?:&|$)/i.test(url)) return false;
-  return { rejectUnauthorized: true };
+function sslFor(url: string): false | { rejectUnauthorized: false } {
+  const mode = /(?:^|[?&])sslmode=([^&]*)/i.exec(url)?.[1]?.toLowerCase() ?? "";
+  if (mode === "disable") return false;
+  const local = /@(?:localhost|127\.0\.0\.1)(?::|\/|\?|$)/i.test(url);
+  if (local && !mode) return false;
+  // Encrypt the session. Do not verify the certificate: Coolify's same-server
+  // certificate is signed by its own CA, and `require` is the matching mode.
+  return { rejectUnauthorized: false };
 }
 
 async function openPostgres(url: string): Promise<Executor> {
