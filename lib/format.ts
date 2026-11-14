@@ -21,6 +21,23 @@ export function formatWhen(iso: string) {
   return `${day} ${MONTHS[date.getMonth()]} ${date.getFullYear()}, ${hours}:${minutes} ${suffix}`;
 }
 
+export function formatWhenIst(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(date);
+  const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  const dayPeriod = pick("dayPeriod").toUpperCase();
+  return `${pick("day")} ${pick("month")} ${pick("year")}, ${pick("hour")}:${pick("minute")} ${dayPeriod} IST`;
+}
+
 export function starGlyphs(rating: number) {
   const safe = Math.max(0, Math.min(5, Math.round(rating)));
   return `${"★".repeat(safe)}${"☆".repeat(5 - safe)}`;

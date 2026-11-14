@@ -414,6 +414,69 @@ textarea.control {
   box-shadow: 0 0 0 1px rgba(110, 196, 151, 0.18);
 }
 
+.slide-card { animation: slide-in 0.4s ease; }
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.slide-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.dot.active {
+  width: 22px;
+  background: var(--green);
+}
+
+.reminder {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.reminder-note {
+  margin: 0;
+  max-width: 220px;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.link-url {
+  display: block;
+  max-width: 220px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.responses.links { min-width: 1080px; }
+
 @media (hover: hover) {
   .link-card:hover, .review-card:hover {
     transform: translateY(-3px);
@@ -651,7 +714,7 @@ textarea.control {
 @media (max-width: 640px) {
   .logo { height: 40px; }
   .tabs, .top-actions, .top-actions .btn { width: 100%; }
-  .tab { flex: 1; }
+  .tab { flex: 1; padding: 8px 10px; font-size: 14px; }
   .title { font-size: 34px; }
   .card { padding: 16px; }
   .inline-add { flex-direction: column; }

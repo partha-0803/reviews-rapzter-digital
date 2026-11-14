@@ -23,6 +23,7 @@ export type ReviewLink = {
   email: string;
   createdAt: string;
   status: "pending" | "submitted";
+  lastReminderAt?: string;
   response?: ReviewResponse;
 };
 

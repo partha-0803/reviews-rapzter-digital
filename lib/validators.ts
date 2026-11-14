@@ -9,6 +9,7 @@ export const SERVICES = [
   "Marketing Automation",
   "Content Marketing",
   "Website Development & Maintenance",
+  "Branding and Identity",
 ] as const;
 
 export const NO_FEEDBACK = "No feedback yet";

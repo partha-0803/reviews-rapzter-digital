@@ -31,7 +31,7 @@ function asHtml(value: string) {
   return escapeHtml(value).replace(/\n/g, "<br>");
 }
 
-function shell(heading: string, body: string) {
+function shell(heading: string, body: string, signoff = "Enabling Business") {
   return `<div style="margin:0;padding:24px;background:#eef3f0;font-family:Arial,Helvetica,sans-serif;color:#14211b;">
     <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:18px;overflow:hidden;">
       <div style="height:8px;background:#123226;"></div>
@@ -39,7 +39,7 @@ function shell(heading: string, body: string) {
         <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.16em;text-transform:uppercase;color:#1f8f5f;">Rapzter Digital</p>
         <h1 style="margin:0 0 16px;font-size:26px;line-height:1.2;color:#102018;">${heading}</h1>
         ${body}
-        <p style="margin:28px 0 0;font-size:13px;color:#5d6b64;">Enabling Business</p>
+        <p style="margin:28px 0 0;font-size:13px;color:#5d6b64;">${escapeHtml(signoff)}</p>
       </div>
     </div>
   </div>`;
@@ -165,6 +165,28 @@ export async function sendAdminReset(email: string, link: string) {
         `<p style="margin:0 0 16px;font-size:16px;line-height:1.5;">The temporary desk password needs to be replaced. This link expires in 30 minutes.</p>
          <p style="margin:0 0 20px;"><a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#123226;color:#ffffff;text-decoration:none;">Choose a new password</a></p>
          <p style="margin:0;font-size:13px;line-height:1.5;color:#5d6b64;">If you did not ask for this, you can ignore the email. The link only works once.</p>`,
+      ),
+    },
+    token,
+  );
+}
+
+export async function sendReviewReminder(link: ReviewLink, url: string) {
+  if (!isMailConfigured()) throw new Error("Microsoft Graph is not configured.");
+  const token = await graphToken();
+  const safeUrl = escapeHtml(url);
+  await sendGraph(
+    {
+      subject: `A short review for ${link.brandName}`,
+      to: [link.email],
+      html: shell(
+        `Hi ${escapeHtml(link.pocName)},`,
+        `<p style="margin:0 0 16px;font-size:16px;line-height:1.5;">Thank you for trusting Rapzter Digital with ${escapeHtml(link.service)} for ${escapeHtml(link.brandName)}.</p>
+         <p style="margin:0 0 16px;font-size:16px;line-height:1.5;">Whenever you have two minutes, we would be grateful if you could share a short review. It helps us understand what worked and where we can do better.</p>
+         <p style="margin:0 0 20px;"><a href="${safeUrl}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#123226;color:#ffffff;text-decoration:none;">Share your review</a></p>
+         <p style="margin:0 0 16px;font-size:14px;line-height:1.5;color:#5d6b64;">The link stays open until you submit:<br><a href="${safeUrl}" style="color:#1f8f5f;">${safeUrl}</a></p>
+         <p style="margin:0;font-size:16px;line-height:1.5;">Thank you for your time.</p>`,
+        "Team Rapzter",
       ),
     },
     token,

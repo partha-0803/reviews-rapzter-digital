@@ -4,6 +4,7 @@ import { access, mkdir, readFile } from "fs/promises";
 import path from "path";
 import { Pool } from "pg";
 import { ADMIN_EMAIL, INITIAL_PASSWORD, hashPassword, passwordError, verifyPassword } from "./passwords";
+import { REMINDER_COOLDOWN_MS } from "./reminders";
 import type { EmailStatus, InviteInput, ResponseInput, ReviewLink, StoreFile } from "./types";
 import { configuredCc } from "./validators";
 
@@ -146,6 +147,12 @@ async function ensureSchema(executor: Executor) {
       email_detail TEXT
     )
   `);
+  try {
+    await executor.query(`ALTER TABLE links ADD COLUMN last_reminder_at TEXT`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/duplicate column|already exists/i.test(message)) throw error;
+  }
   await executor.query(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -388,6 +395,8 @@ function toLink(row: SqlRow): ReviewLink {
     createdAt: cell(row, "created_at"),
     status,
   };
+  const reminded = cell(row, "last_reminder_at");
+  if (reminded) link.lastReminderAt = reminded;
   if (status === "submitted" && cell(row, "submitted_at")) {
     const client = cell(row, "email_client");
     const internal = cell(row, "email_internal");
@@ -499,6 +508,52 @@ export async function setEmailStatus(token: string, emailStatus: EmailStatus) {
     [emailStatus.client, emailStatus.internal, emailStatus.detail ?? null, token],
   );
   return getLink(token);
+}
+
+export async function claimReminder(token: string) {
+  const executor = await db();
+  const current = await getLink(token);
+  if (!current) return { ok: false as const, status: 404, error: "This link is not active." };
+  if (current.status === "submitted") {
+    return { ok: false as const, status: 409, error: "This review has already been submitted.", link: current };
+  }
+  const nowIso = new Date().toISOString();
+  const cutoff = new Date(Date.now() - REMINDER_COOLDOWN_MS).toISOString();
+  const updated = await executor.query(
+    `UPDATE links SET last_reminder_at = ?
+     WHERE token = ? AND status = 'pending'
+       AND (last_reminder_at IS NULL OR last_reminder_at <= ?)`,
+    [nowIso, token, cutoff],
+  );
+  if (updated.rowsAffected === 0) {
+    const link = await getLink(token);
+    if (!link) return { ok: false as const, status: 404, error: "This link is not active." };
+    if (link.status === "submitted") {
+      return { ok: false as const, status: 409, error: "This review has already been submitted.", link };
+    }
+    return { ok: false as const, status: 429, error: "A reminder was already sent in the last 24 hours.", link };
+  }
+  const link = await getLink(token);
+  return {
+    ok: true as const,
+    link: link ?? { ...current, lastReminderAt: nowIso },
+    previous: current.lastReminderAt ?? null,
+  };
+}
+
+export async function releaseReminder(token: string, claimedAt: string, previous: string | null) {
+  const executor = await db();
+  if (previous) {
+    await executor.query(
+      `UPDATE links SET last_reminder_at = ? WHERE token = ? AND last_reminder_at = ?`,
+      [previous, token, claimedAt],
+    );
+    return;
+  }
+  await executor.query(
+    `UPDATE links SET last_reminder_at = NULL WHERE token = ? AND last_reminder_at = ?`,
+    [token, claimedAt],
+  );
 }
 
 export async function deleteLink(token: string) {

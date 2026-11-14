@@ -5,12 +5,13 @@ import type { FormEvent } from "react";
 import { SelectField, TextField } from "@/components/Fields";
 import Logo from "@/components/Logo";
 import Stars from "@/components/Stars";
-import { formatWhen, localDateKey, starGlyphs, testimonialText } from "@/lib/format";
+import { formatWhen, formatWhenIst, localDateKey, starGlyphs, testimonialText } from "@/lib/format";
+import { reminderWait } from "@/lib/reminders";
 import { isPrivateUrl, mailtoHref, reviewUrl, whatsappHref } from "@/lib/share";
 import type { EmailStatus, ReviewLink } from "@/lib/types";
 import { EMAIL, LIMITS, SERVICES, validateInvite, type InviteErrors } from "@/lib/validators";
 
-type Tab = "create" | "responses";
+type Tab = "create" | "links" | "responses";
 
 const EMPTY_INVITE = { pocName: "", brandName: "", service: "", email: "" };
 const PAGE_SIZE = 8;
@@ -222,6 +223,25 @@ export default function AdminDesk({ email }: { email: string }) {
     }
   }
 
+  async function remind(token: string) {
+    setBusy(`remind:${token}`);
+    setFormError("");
+    try {
+      const response = await fetch(`/api/links/${token}/remind`, { method: "POST" });
+      const data = await readJson(response);
+      if (sessionExpired(response)) return;
+      if (data.link) {
+        const link = data.link as ReviewLink;
+        setLinks((current) => current.map((item) => (item.token === link.token ? link : item)));
+      }
+      if (!response.ok) setFormError(data.error || "Could not send the reminder.");
+    } catch {
+      setFormError("Could not send the reminder.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const received = links.filter((link) => link.status === "submitted");
   const awaiting = links.length - received.length;
   const fresh = links.find((link) => link.token === freshToken);
@@ -249,10 +269,41 @@ export default function AdminDesk({ email }: { email: string }) {
         <Logo />
         <div className="top-actions">
           <div className="tabs" role="tablist" aria-label="Review desk">
-            <button className={tab === "create" ? "tab active" : "tab"} type="button" role="tab" aria-selected={tab === "create"} onClick={() => setTab("create")}>
+            <button
+              className={tab === "create" ? "tab active" : "tab"}
+              type="button"
+              role="tab"
+              aria-selected={tab === "create"}
+              onClick={() => {
+                setTab("create");
+                setFormError("");
+              }}
+            >
               Create link
             </button>
-            <button className={tab === "responses" ? "tab active" : "tab"} type="button" role="tab" aria-selected={tab === "responses"} onClick={() => setTab("responses")}>
+            <button
+              className={tab === "links" ? "tab active" : "tab"}
+              type="button"
+              role="tab"
+              aria-selected={tab === "links"}
+              onClick={() => {
+                setTab("links");
+                setFormError("");
+              }}
+            >
+              Created links
+              <span className="tab-count">{links.length}</span>
+            </button>
+            <button
+              className={tab === "responses" ? "tab active" : "tab"}
+              type="button"
+              role="tab"
+              aria-selected={tab === "responses"}
+              onClick={() => {
+                setTab("responses");
+                setFormError("");
+              }}
+            >
               Responses
               <span className="tab-count">{received.length}</span>
             </button>
@@ -403,67 +454,34 @@ export default function AdminDesk({ email }: { email: string }) {
                     onAdd={addRecipient}
                     onRemove={(email) => void saveRecipients(notifyEmails.filter((item) => item !== email))}
                   />
-                  <section className="card stack">
-                    <div className="card-top">
-                      <h2 className="h3">Issued links</h2>
-                      <span className="hint">{links.length}</span>
-                    </div>
-                    {links.length === 0 ? <p className="empty">Generated links will collect here, ready to copy.</p> : null}
-                    <div className="link-list">
-                      {links.map((link) => {
-                        const url = reviewUrl(link.token);
-                        return (
-                          <article key={link.token} className={link.token === freshToken ? "link-card fresh" : "link-card"}>
-                            <div className="card-top">
-                              <h3 className="h3">{link.brandName}</h3>
-                              <span className={link.status === "submitted" ? "pill done" : "pill wait"}>
-                                {link.status === "submitted" ? "Closed" : "Awaiting"}
-                              </span>
-                            </div>
-                            <p className="hint">
-                              {link.pocName} · {link.email}
-                            </p>
-                            <p className="hint">{link.service}</p>
-                            <p className="meta">
-                              <time dateTime={link.createdAt}>{formatWhen(link.createdAt)}</time>
-                            </p>
-                            <div className="actions">
-                              <button className="btn small ghost" type="button" onClick={() => void copyText(link.token, url)}>
-                                {copied === link.token ? "Copied" : "Copy link"}
-                              </button>
-                              <a className="btn small ghost" href={whatsappHref(url, link)} target="_blank" rel="noreferrer">
-                                WhatsApp
-                              </a>
-                              <a className="btn small ghost" href={mailtoHref(url, link)}>
-                                Email link
-                              </a>
-                              <a className="btn small ghost" href={`/r/${link.token}`} target="_blank" rel="noreferrer">
-                                Preview
-                              </a>
-                              {confirmToken === link.token ? (
-                                <div className="confirm">
-                                  <span>Delete this record?</span>
-                                  <button className="btn small danger" type="button" disabled={busy === `delete:${link.token}`} onClick={() => void withdraw(link.token)}>
-                                    Delete
-                                  </button>
-                                  <button className="btn small ghost" type="button" onClick={() => setConfirmToken(null)}>
-                                    Keep
-                                  </button>
-                                </div>
-                              ) : (
-                                <button className="btn small ghost" type="button" onClick={() => setConfirmToken(link.token)}>
-                                  Delete
-                                </button>
-                              )}
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  </section>
+                  <PendingSlideshow
+                    links={links}
+                    freshToken={freshToken}
+                    copied={copied}
+                    confirmToken={confirmToken}
+                    busy={busy}
+                    onCopy={(id, text) => void copyText(id, text)}
+                    onConfirm={setConfirmToken}
+                    onWithdraw={(token) => void withdraw(token)}
+                  />
                 </div>
               </div>
-            ) : (
+            ) : null}
+            {tab === "links" ? (
+              <CreatedLinks
+                links={links}
+                copied={copied}
+                confirmToken={confirmToken}
+                busy={busy}
+                mailConfigured={mailConfigured}
+                formError={formError}
+                onCopy={(id, text) => void copyText(id, text)}
+                onRemind={(token) => void remind(token)}
+                onConfirm={setConfirmToken}
+                onWithdraw={(token) => void withdraw(token)}
+              />
+            ) : null}
+            {tab === "responses" ? (
               <section className="stack">
                 <div>
                   <p className="kicker">Record</p>
@@ -640,7 +658,7 @@ export default function AdminDesk({ email }: { email: string }) {
                   </>
                 )}
               </section>
-            )}
+            ) : null}
           </>
         ) : null}
       </main>
@@ -733,6 +751,276 @@ GRAPH_SENDER_EMAIL=reviews@yourdomain.com
 EMAIL_CC=team@yourdomain.com`}</pre>
         </details>
       )}
+    </section>
+  );
+}
+
+function PendingSlideshow({
+  links,
+  freshToken,
+  copied,
+  confirmToken,
+  busy,
+  onCopy,
+  onConfirm,
+  onWithdraw,
+}: {
+  links: ReviewLink[];
+  freshToken: string | null;
+  copied: string | null;
+  confirmToken: string | null;
+  busy: string | null;
+  onCopy: (id: string, text: string) => void;
+  onConfirm: (token: string | null) => void;
+  onWithdraw: (token: string) => void;
+}) {
+  const pending = links.filter((link) => link.status === "pending");
+  const slides = pending.slice(0, 3);
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const newest = slides[0]?.token ?? "";
+  const safeIndex = slides.length === 0 ? 0 : index % slides.length;
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => setReduceMotion(media.matches);
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    setIndex(0);
+  }, [newest]);
+
+  useEffect(() => {
+    if (slides.length < 2 || paused || reduceMotion) return;
+    const id = window.setTimeout(() => {
+      setIndex((current) => (current + 1) % slides.length);
+    }, 5000);
+    return () => window.clearTimeout(id);
+  }, [slides.length, paused, reduceMotion, safeIndex]);
+
+  const current = slides[safeIndex];
+
+  return (
+    <section className="card stack" aria-roledescription="carousel" aria-label="Latest pending links" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+      <div className="card-top">
+        <h2 className="h3">Latest pending</h2>
+        <span className="hint">{pending.length}</span>
+      </div>
+      {pending.length > slides.length ? <p className="hint">Showing the 3 latest. Every link is under Created links.</p> : null}
+      {!current ? <p className="empty">Pending links will show here, three at a time.</p> : null}
+      {current ? (
+        <article key={current.token} className={current.token === freshToken ? "link-card fresh slide-card" : "link-card slide-card"}>
+          <div className="card-top">
+            <h3 className="h3">{current.brandName}</h3>
+            <span className="pill wait">Pending</span>
+          </div>
+          <p className="hint">
+            {current.pocName} · {current.email}
+          </p>
+          <p className="hint">{current.service}</p>
+          <p className="meta">
+            <time dateTime={current.createdAt}>{formatWhen(current.createdAt)}</time>
+          </p>
+          <div className="actions">
+            <button className="btn small ghost" type="button" onClick={() => onCopy(current.token, reviewUrl(current.token))}>
+              {copied === current.token ? "Copied" : "Copy link"}
+            </button>
+            <a className="btn small ghost" href={whatsappHref(reviewUrl(current.token), current)} target="_blank" rel="noreferrer">
+              WhatsApp
+            </a>
+            <a className="btn small ghost" href={mailtoHref(reviewUrl(current.token), current)}>
+              Email link
+            </a>
+            <a className="btn small ghost" href={`/r/${current.token}`} target="_blank" rel="noreferrer">
+              Preview
+            </a>
+            {confirmToken === current.token ? (
+              <div className="confirm">
+                <span>Delete this record?</span>
+                <button className="btn small danger" type="button" disabled={busy === `delete:${current.token}`} onClick={() => onWithdraw(current.token)}>
+                  Delete
+                </button>
+                <button className="btn small ghost" type="button" onClick={() => onConfirm(null)}>
+                  Keep
+                </button>
+              </div>
+            ) : (
+              <button className="btn small ghost" type="button" onClick={() => onConfirm(current.token)}>
+                Delete
+              </button>
+            )}
+          </div>
+        </article>
+      ) : null}
+      {slides.length > 1 ? (
+        <div className="slide-nav">
+          <button className="btn small ghost" type="button" onClick={() => setIndex((safeIndex - 1 + slides.length) % slides.length)}>
+            Previous
+          </button>
+          <div className="dots" role="tablist" aria-label="Pending links">
+            {slides.map((link, dot) => (
+              <button
+                key={link.token}
+                className={dot === safeIndex ? "dot active" : "dot"}
+                type="button"
+                role="tab"
+                aria-label={`${link.brandName}, ${dot + 1} of ${slides.length}`}
+                aria-selected={dot === safeIndex}
+                onClick={() => setIndex(dot)}
+              />
+            ))}
+          </div>
+          <button className="btn small ghost" type="button" onClick={() => setIndex((safeIndex + 1) % slides.length)}>
+            Next
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function CreatedLinks({
+  links,
+  copied,
+  confirmToken,
+  busy,
+  mailConfigured,
+  formError,
+  onCopy,
+  onRemind,
+  onConfirm,
+  onWithdraw,
+}: {
+  links: ReviewLink[];
+  copied: string | null;
+  confirmToken: string | null;
+  busy: string | null;
+  mailConfigured: boolean;
+  formError: string;
+  onCopy: (id: string, text: string) => void;
+  onRemind: (token: string) => void;
+  onConfirm: (token: string | null) => void;
+  onWithdraw: (token: string) => void;
+}) {
+  const [page, setPage] = useState(1);
+  const [now, setNow] = useState(() => Date.now());
+  const ordered = [...links].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const pageCount = Math.max(1, Math.ceil(ordered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const visible = ordered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return (
+    <section className="stack">
+      <div>
+        <p className="kicker">Links</p>
+        <h1 className="title">Created links</h1>
+        <p className="lede">Every review link from this desk, with a reminder when the client has not submitted yet.</p>
+      </div>
+      {formError ? <p className="alert">{formError}</p> : null}
+      {ordered.length === 0 ? <p className="empty">Generated links will collect here.</p> : null}
+      {ordered.length > 0 ? (
+        <>
+          <div className="table-wrap">
+            <table className="responses links">
+              <thead>
+                <tr>
+                  <th>Brand name</th>
+                  <th>Point of contact</th>
+                  <th>Service provided</th>
+                  <th>Email address</th>
+                  <th>Link</th>
+                  <th>Status</th>
+                  <th>Send reminder</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((link) => {
+                  const url = reviewUrl(link.token);
+                  const submitted = link.status === "submitted";
+                  const cooling = Boolean(reminderWait(link.lastReminderAt, now));
+                  const sending = busy === `remind:${link.token}`;
+                  return (
+                    <tr key={link.token}>
+                      <td>{link.brandName}</td>
+                      <td>{link.pocName}</td>
+                      <td>{link.service}</td>
+                      <td>{link.email}</td>
+                      <td>
+                        <span className="link-url" title={url}>
+                          {url}
+                        </span>
+                        <div className="actions">
+                          <button className="btn small ghost" type="button" onClick={() => onCopy(`link-${link.token}`, url)}>
+                            {copied === `link-${link.token}` ? "Copied" : "Copy"}
+                          </button>
+                          {confirmToken === link.token ? (
+                            <>
+                              <button className="btn small danger" type="button" disabled={busy === `delete:${link.token}`} onClick={() => onWithdraw(link.token)}>
+                                Delete
+                              </button>
+                              <button className="btn small ghost" type="button" onClick={() => onConfirm(null)}>
+                                Keep
+                              </button>
+                            </>
+                          ) : (
+                            <button className="btn small ghost" type="button" onClick={() => onConfirm(link.token)}>
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <span className={submitted ? "pill done" : "pill wait"}>{submitted ? "Submitted" : "Pending"}</span>
+                      </td>
+                      <td>
+                        <div className="reminder">
+                          <button
+                            className="btn small primary"
+                            type="button"
+                            disabled={submitted || cooling || !mailConfigured || sending}
+                            onClick={() => onRemind(link.token)}
+                          >
+                            {sending ? "Sending…" : "Send email"}
+                          </button>
+                          {link.lastReminderAt ? (
+                            <p className="reminder-note">
+                              Last reminder sent on <time dateTime={link.lastReminderAt}>{formatWhenIst(link.lastReminderAt)}</time>
+                            </p>
+                          ) : null}
+                          {submitted ? <p className="reminder-note">Review submitted</p> : null}
+                          {!submitted && !mailConfigured ? <p className="reminder-note">Connect Microsoft Graph to send this.</p> : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="pager">
+            <p className="hint">
+              {ordered.length} link{ordered.length === 1 ? "" : "s"} · page {currentPage} of {pageCount}
+            </p>
+            <div className="actions">
+              <button className="btn small ghost" type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>
+                Previous
+              </button>
+              <button className="btn small ghost" type="button" disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>
+                Next
+              </button>
+            </div>
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }

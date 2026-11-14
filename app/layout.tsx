@@ -1,6 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import { Outfit } from "next/font/google";
+import { BRAND_IMAGE, brandIcons } from "@/lib/origin";
 import "./globals.css";
+
+function metadataBase() {
+  const origin = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "");
+  if (!origin) return undefined;
+  try {
+    return new URL(origin);
+  } catch {
+    return undefined;
+  }
+}
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -9,16 +20,23 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
+  metadataBase: metadataBase(),
   title: {
     default: "Review desk · Rapzter Digital",
     template: "%s · Rapzter Digital",
   },
   description: "Private review links for Rapzter Digital clients.",
   robots: { index: false, follow: false },
-  icons: {
-    icon: [{ url: "/favicon-32.png", type: "image/png", sizes: "32x32" }],
-    shortcut: "/favicon-32.png",
-    apple: "/favicon-32.png",
+  icons: brandIcons,
+  openGraph: {
+    title: "Review desk · Rapzter Digital",
+    description: "Private review links for Rapzter Digital clients.",
+    type: "website",
+    images: [{ url: BRAND_IMAGE, width: 1200, height: 630, alt: "Rapzter Digital" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    images: [BRAND_IMAGE],
   },
 };
 
