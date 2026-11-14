@@ -1,5 +1,6 @@
 import { deliver } from "@/lib/mail";
 import { errorMessage, json } from "@/lib/http";
+import { allow, clientIp } from "@/lib/rate-limit";
 import { getStore, setEmailStatus, submitLink } from "@/lib/store";
 import { validateResponse } from "@/lib/validators";
 
@@ -8,6 +9,9 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request, context: { params: Promise<{ token: string }> }) {
   try {
+    if (!allow(`submit:${clientIp(request)}`, 20, 15 * 60 * 1000)) {
+      return json({ error: "Too many attempts. Wait a few minutes and try again." }, 429);
+    }
     const { token } = await context.params;
     const body: unknown = await request.json();
     const parsed = validateResponse(body);

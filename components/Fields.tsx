@@ -1,3 +1,8 @@
+"use client";
+
+import { useEffect, useId, useRef, useState } from "react";
+import type { KeyboardEvent as KeyEvent } from "react";
+
 export function TextField({
   id,
   label,
@@ -66,27 +71,123 @@ export function SelectField({
   error?: string;
   placeholder: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const listId = useId();
   const describedBy = error ? `${id}-error` : undefined;
+  const selectedIndex = Math.max(0, options.indexOf(value));
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKey(event: { key: string }) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) listRef.current?.focus();
+  }, [open]);
+
+  function choose(next: string) {
+    onChange(next);
+    setOpen(false);
+    document.getElementById(id)?.focus();
+  }
+
+  function onTriggerKey(event: KeyEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setActive(value ? selectedIndex : 0);
+      setOpen(true);
+    }
+  }
+
+  function onListKey(event: KeyEvent<HTMLUListElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActive((current) => (current + 1) % options.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActive((current) => (current - 1 + options.length) % options.length);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setActive(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setActive(options.length - 1);
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      const next = options[active];
+      if (next) choose(next);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+      document.getElementById(id)?.focus();
+    }
+  }
+
   return (
-    <div className="field">
+    <div className="field menu" ref={rootRef}>
       <label className="field-label" htmlFor={id}>
         {label}
       </label>
-      <select
-        id={id}
-        className="control"
-        value={value}
-        aria-invalid={Boolean(error)}
-        aria-describedby={describedBy}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">{placeholder}</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+      <div className="menu-anchor">
+        <button
+          id={id}
+          className={value ? "control menu-trigger" : "control menu-trigger placeholder"}
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-invalid={Boolean(error)}
+          aria-describedby={describedBy}
+          onClick={() => {
+            setActive(value ? selectedIndex : 0);
+            setOpen((current) => !current);
+          }}
+          onKeyDown={onTriggerKey}
+        >
+          <span>{value || placeholder}</span>
+          <span className="menu-caret" aria-hidden="true" />
+        </button>
+        {open ? (
+          <ul
+            id={listId}
+            className="menu-panel"
+            role="listbox"
+            tabIndex={-1}
+            aria-labelledby={id}
+            ref={listRef}
+            onKeyDown={onListKey}
+          >
+            {options.map((option, index) => (
+              <li key={option} role="presentation">
+                <button
+                  className={index === active ? "menu-option active" : "menu-option"}
+                  type="button"
+                  role="option"
+                  aria-selected={option === value}
+                  onMouseEnter={() => setActive(index)}
+                  onClick={() => choose(option)}
+                >
+                  {option}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
       {error ? <p id={`${id}-error`} className="field-error">{error}</p> : null}
     </div>
   );

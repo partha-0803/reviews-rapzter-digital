@@ -1,4 +1,5 @@
 import { errorMessage, json } from "@/lib/http";
+import { requireAdmin } from "@/lib/session";
 import { setNotifyEmails } from "@/lib/store";
 import { validateEmailList } from "@/lib/validators";
 
@@ -7,6 +8,8 @@ export const dynamic = "force-dynamic";
 
 export async function PUT(request: Request) {
   try {
+    const denied = await requireAdmin();
+    if (denied) return denied;
     const body: unknown = await request.json();
     const parsed = validateEmailList(body);
     if (!parsed.ok) return json({ error: parsed.error }, 400);

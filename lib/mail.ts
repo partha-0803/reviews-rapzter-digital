@@ -153,6 +153,24 @@ export function teamRecipients(extra: string[]) {
   return emailList([...configuredCc(), ...extra].join(","));
 }
 
+export async function sendAdminReset(email: string, link: string) {
+  if (!isMailConfigured()) throw new Error("Microsoft Graph is not configured.");
+  const token = await graphToken();
+  await sendGraph(
+    {
+      subject: "Reset your Rapzter review desk password",
+      to: [email],
+      html: shell(
+        "Choose a new password",
+        `<p style="margin:0 0 16px;font-size:16px;line-height:1.5;">The temporary desk password needs to be replaced. This link expires in 30 minutes.</p>
+         <p style="margin:0 0 20px;"><a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#123226;color:#ffffff;text-decoration:none;">Choose a new password</a></p>
+         <p style="margin:0;font-size:13px;line-height:1.5;color:#5d6b64;">If you did not ask for this, you can ignore the email. The link only works once.</p>`,
+      ),
+    },
+    token,
+  );
+}
+
 export async function deliver(link: ReviewLink, notifyEmails: string[]): Promise<EmailStatus> {
   if (!link.response) return { client: "failed", internal: "failed", detail: "Nothing to send." };
   if (!isMailConfigured()) {

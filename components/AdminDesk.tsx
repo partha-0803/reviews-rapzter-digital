@@ -36,7 +36,7 @@ function mailLine(status: EmailStatus) {
   return { tone: "warn" as const, text: "Saved in the desk. Connect Microsoft Graph to send it out." };
 }
 
-export default function AdminDesk() {
+export default function AdminDesk({ email }: { email: string }) {
   const [tab, setTab] = useState<Tab>("create");
   const [links, setLinks] = useState<ReviewLink[]>([]);
   const [notifyEmails, setNotifyEmails] = useState<string[]>([]);
@@ -91,6 +91,11 @@ export default function AdminDesk() {
   useEffect(() => {
     void load(true);
   }, [load]);
+
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.assign("/");
+  }
 
   async function copyText(id: string, text: string) {
     try {
@@ -241,8 +246,12 @@ export default function AdminDesk() {
               <span className="tab-count">{received.length}</span>
             </button>
           </div>
+          <span className="who">{email}</span>
           <button className="btn small ghost" type="button" onClick={() => void load(false)} disabled={loading || refreshing}>
             {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+          <button className="btn small ghost" type="button" onClick={() => void signOut()}>
+            Sign out
           </button>
         </div>
       </header>

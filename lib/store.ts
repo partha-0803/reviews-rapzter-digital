@@ -1,8 +1,9 @@
 import { createClient, type Client } from "@libsql/client";
-import { randomBytes } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { access, mkdir, readFile } from "fs/promises";
 import path from "path";
 import { Pool } from "pg";
+import { ADMIN_EMAIL, INITIAL_PASSWORD, hashPassword, passwordError, verifyPassword } from "./passwords";
 import type { EmailStatus, InviteInput, ResponseInput, ReviewLink, StoreFile } from "./types";
 import { configuredCc } from "./validators";
 
@@ -57,28 +58,54 @@ async function open(): Promise<Executor> {
   return openSqlite();
 }
 
-function postgresPool(url: string) {
-  const cached = globalThis as PgGlobal;
-  if (!cached.__reviewsPgPool) {
-    const local = /localhost|127\.0\.0\.1/.test(url);
-    const disableSsl = /sslmode=disable/i.test(url);
-    const connectionString = url
-      .replace(/([?&])sslmode=[^&]*&?/i, "$1")
-      .replace(/[?&]$/, "")
-      .replace(/\?&/, "?");
-    cached.__reviewsPgPool = new Pool({
-      connectionString,
-      max: 5,
-      idleTimeoutMillis: 20_000,
-      connectionTimeoutMillis: 20_000,
-      ssl: local || disableSsl ? false : { rejectUnauthorized: false },
-    });
+function bareConnectionString(url: string) {
+  return url
+    .replace(/([?&])sslmode=[^&]*&?/i, "$1")
+    .replace(/([?&])ssl=[^&]*&?/i, "$1")
+    .replace(/[?&]$/, "")
+    .replace(/\?&/, "?");
+}
+
+function sslRequested(url: string) {
+  if (/(?:^|[?&])sslmode=disable(?:&|$)/i.test(url)) return false;
+  return /(?:^|[?&])sslmode=(?:require|verify-ca|verify-full|prefer)(?:&|$)/i.test(url) || /(?:^|[?&])ssl=true(?:&|$)/i.test(url);
+}
+
+function makePool(url: string, ssl: boolean) {
+  return new Pool({
+    connectionString: bareConnectionString(url),
+    max: 5,
+    idleTimeoutMillis: 20_000,
+    connectionTimeoutMillis: 20_000,
+    ssl: ssl ? { rejectUnauthorized: false } : false,
+  });
+}
+
+async function connectPostgres(url: string) {
+  const requested = sslRequested(url);
+  const pool = makePool(url, requested);
+  try {
+    await pool.query("SELECT 1");
+    return pool;
+  } catch (error) {
+    await pool.end().catch(() => undefined);
+    const message = error instanceof Error ? error.message : "";
+    if (!requested || !/does not support ssl/i.test(message)) throw error;
   }
-  return cached.__reviewsPgPool;
+  const plain = makePool(url, false);
+  try {
+    await plain.query("SELECT 1");
+    return plain;
+  } catch (error) {
+    await plain.end().catch(() => undefined);
+    throw error;
+  }
 }
 
 async function openPostgres(url: string): Promise<Executor> {
-  const pool = postgresPool(url);
+  const cached = globalThis as PgGlobal;
+  if (!cached.__reviewsPgPool) cached.__reviewsPgPool = await connectPostgres(url);
+  const pool = cached.__reviewsPgPool;
   const executor: Executor = {
     async query(statement, args = []) {
       const result = await pool.query(toPostgres(statement), args);
@@ -144,6 +171,131 @@ async function ensureSchema(executor: Executor) {
   await executor.query(`INSERT INTO settings (key, value) VALUES ('notify_emails', ?) ON CONFLICT(key) DO NOTHING`, [
     JSON.stringify(configuredCc()),
   ]);
+  await executor.query(`
+    CREATE TABLE IF NOT EXISTS admins (
+      email TEXT PRIMARY KEY,
+      password_hash TEXT NOT NULL,
+      must_reset INTEGER NOT NULL DEFAULT 1,
+      reset_token_hash TEXT,
+      reset_expires TEXT
+    )
+  `);
+  await executor.query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )
+  `);
+  await ensureAdmin(executor);
+}
+
+async function ensureAdmin(executor: Executor) {
+  const existing = await executor.query("SELECT email FROM admins WHERE email = ?", [ADMIN_EMAIL]);
+  if (existing.rows[0]) return;
+  await executor.query(
+    `INSERT INTO admins (email, password_hash, must_reset) VALUES (?, ?, 1)
+     ON CONFLICT(email) DO NOTHING`,
+    [ADMIN_EMAIL, await hashPassword(INITIAL_PASSWORD)],
+  );
+}
+
+function sha256(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+let dummyHash: Promise<string> | null = null;
+
+export async function authenticateAdmin(email: string, password: string) {
+  const executor = await db();
+  const result = await executor.query("SELECT email, password_hash, must_reset FROM admins WHERE email = ?", [
+    email.toLowerCase(),
+  ]);
+  const row = result.rows[0];
+  if (!row) {
+    if (!dummyHash) dummyHash = hashPassword("not-the-admin-password");
+    await verifyPassword(password, await dummyHash);
+    return null;
+  }
+  const ok = await verifyPassword(password, String(row.password_hash));
+  if (!ok) return null;
+  return { email: String(row.email), mustReset: Number(row.must_reset) === 1 };
+}
+
+export async function issuePasswordReset(email: string) {
+  if (email.toLowerCase() !== ADMIN_EMAIL) return null;
+  const executor = await db();
+  const existing = await executor.query("SELECT email FROM admins WHERE email = ?", [ADMIN_EMAIL]);
+  if (!existing.rows[0]) return null;
+  const token = randomBytes(32).toString("base64url");
+  const expires = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  await executor.query("UPDATE admins SET reset_token_hash = ?, reset_expires = ? WHERE email = ?", [
+    sha256(token),
+    expires,
+    ADMIN_EMAIL,
+  ]);
+  return token;
+}
+
+export async function completePasswordReset(token: string, password: string) {
+  const problem = passwordError(password);
+  if (problem) return { ok: false as const, error: problem };
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) {
+    return { ok: false as const, error: "This reset link is not valid." };
+  }
+  const executor = await db();
+  const result = await executor.query(
+    "SELECT email, password_hash, reset_expires FROM admins WHERE reset_token_hash = ?",
+    [sha256(token)],
+  );
+  const row = result.rows[0];
+  if (!row || String(row.reset_expires ?? "") <= new Date().toISOString()) {
+    return { ok: false as const, error: "This reset link has expired. Request a new one." };
+  }
+  if (await verifyPassword(password, String(row.password_hash))) {
+    return { ok: false as const, error: "Choose a different password than the one you use now." };
+  }
+  const email = String(row.email);
+  await executor.query(
+    "UPDATE admins SET password_hash = ?, must_reset = 0, reset_token_hash = NULL, reset_expires = NULL WHERE email = ?",
+    [await hashPassword(password), email],
+  );
+  await executor.query("DELETE FROM sessions WHERE email = ?", [email]);
+  return { ok: true as const, email };
+}
+
+export async function createSession(email: string) {
+  const executor = await db();
+  const now = new Date().toISOString();
+  await executor.query("DELETE FROM sessions WHERE email = ? OR expires_at <= ?", [email, now]);
+  const token = randomBytes(32).toString("base64url");
+  const expires = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  await executor.query("INSERT INTO sessions (token_hash, email, expires_at) VALUES (?, ?, ?)", [
+    sha256(token),
+    email,
+    expires,
+  ]);
+  return token;
+}
+
+export async function adminForSession(token: string) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  const executor = await db();
+  const hash = sha256(token);
+  const result = await executor.query("SELECT email, expires_at FROM sessions WHERE token_hash = ?", [hash]);
+  const row = result.rows[0];
+  if (!row) return null;
+  if (String(row.expires_at) <= new Date().toISOString()) {
+    await executor.query("DELETE FROM sessions WHERE token_hash = ?", [hash]);
+    return null;
+  }
+  return String(row.email);
+}
+
+export async function deleteSession(token: string) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return;
+  const executor = await db();
+  await executor.query("DELETE FROM sessions WHERE token_hash = ?", [sha256(token)]);
 }
 
 async function importJson(executor: Executor) {

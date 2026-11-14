@@ -1,5 +1,6 @@
 import { isMailConfigured } from "@/lib/mail";
 import { errorMessage, json } from "@/lib/http";
+import { requireAdmin } from "@/lib/session";
 import { createLink, getStore, storageKind } from "@/lib/store";
 import { configuredCc, validateInvite } from "@/lib/validators";
 
@@ -8,6 +9,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    const denied = await requireAdmin();
+    if (denied) return denied;
     const store = await getStore();
     return json({
       links: store.links,
@@ -23,6 +26,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const denied = await requireAdmin();
+    if (denied) return denied;
     const body: unknown = await request.json();
     const parsed = validateInvite(body);
     if (!parsed.ok) return json({ error: parsed.error, errors: parsed.errors }, 400);

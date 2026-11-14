@@ -1,5 +1,11 @@
 import type { ReviewLink } from "./types";
 
+export function publicOrigin(request: Request) {
+  const configured = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "");
+  if (configured) return configured;
+  return new URL(request.url).origin;
+}
+
 export function reviewUrl(token: string) {
   const configured = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "");
   if (configured) return `${configured}/r/${token}`;
